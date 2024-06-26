@@ -262,11 +262,4 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
   return(zipfile)
 }
 
-parametros <- c('TMAX')
-NASA_POWER$Rango_fecha <- list(as.Date("2024-05-05"), as.Date("2024-05-18"))
-for (parametro in parametros){
-  NASA_POWER$downloads_transformar_a_tif(NASA_POWER$Rango_fecha, 'bol', parametro)
-}
-
-
 
