@@ -1,8 +1,13 @@
 library(shiny)
 library(DT)
 library(shinyjs)
+library(utils)
 
 library(stringi)
+
+library(shinyAce)
+
+
 
 lugar_map <- list(
   "Bolivia" = 'bol',
@@ -17,7 +22,7 @@ parameter_map <- list(
   "CHIRPS" = list(
     "Precipitaci\u00F3n" = "pcp"
   ),
-  "NASA- POWER" = list(
+  "NASA-POWER" = list(
     "Temperatura m\u00E1xima" = "TMAX",
     "Temperatura m\u00EDnima" = "TMIN",
     "humedad relativa" = "HRELATIVA",
@@ -60,7 +65,7 @@ main_categories <- data.frame(
     rep("ERA5", 8),
     "CHIRPS", 
     "GPCC-ALL PRODUCTS", 
-    rep("NASA- POWER", 6), 
+    rep("NASA-POWER", 6), 
     rep("CPC", 3), 
     rep("NCAR/UCAR Reanalysis", 6),
     "PERSIANN-CCS",
@@ -82,15 +87,15 @@ main_categories <- data.frame(
 fecha_today <- Sys.Date()
 main_limites_fechas <- list(
   "CHIRPS" = list(
-    "Precipitaci\u00F3n" = list("1981-01-01",format(fecha_today-5, format("%Y-%m-%d")))
+    "Precipitaci\u00F3n" = list("1981-01-01",format(fecha_today-10, format("%Y-%m-%d")))
   ),
-  "NASA- POWER" = list(
-    "Temperatura m\u00E1xima" = list('1981-01-01',format(fecha_today-1)),
-    "Temperatura m\u00EDnima" = list('1981-01-01',format(fecha_today-1)),
-    "humedad relativa" = list('1981-01-01',format(fecha_today-1)),
-    "Precipitaci\u00F3n" = list('1981-01-01',format(fecha_today-1)),
-    "Humedad del suelo (<5cm)" = list('1981-01-01',format(fecha_today-1)),
-    "Humedad del suelo (<5cm<100cm)" = list('1981-01-01',format(fecha_today-1))
+  "NASA-POWER" = list(
+    "Temperatura m\u00E1xima" = list('1981-01-01',format(fecha_today-47)),
+    "Temperatura m\u00EDnima" = list('1981-01-01',format(fecha_today-47)),
+    "humedad relativa" = list('1981-01-01',format(fecha_today-47)),
+    "Precipitaci\u00F3n" = list('1981-01-01',format(fecha_today-47)),
+    "Humedad del suelo (<5cm)" = list('1981-01-01',format(fecha_today-47)),
+    "Humedad del suelo (<5cm<100cm)" = list('1981-01-01',format(fecha_today-47))
   ),
   "CPC" = list(
     "Precipitaci\u00F3n" = list('1979-01-01',format(fecha_today-2)),
@@ -98,16 +103,16 @@ main_limites_fechas <- list(
     "Temperatura m\u00EDnima" = list('1979-01-01',format(fecha_today-2))
   ),
   "ERA5" = list(
-    "Precipitaci\u00F3n" = list('1940-01-01',format(fecha_today-8)),
-    "Temperatura m\u00E1xima" = list('1940-01-01',format(fecha_today-8)), 
-    "Temperatura m\u00EDnima"=  list('1940-01-01',format(fecha_today-8)), 
-    "Vientos u" =  list('1940-01-01',format(fecha_today-8)), 
-    "Vientos v" =  list('1940-01-01',format(fecha_today-8)),  
-    "Humedad del suelo (0 - 7cm)" =  list('1940-01-01',format(fecha_today-8)),  
-    "Humedad del suelo  (7 - 28cm)" =  list('1940-01-01',format(fecha_today-8)),  
-    "Humedad del suelo  (28 - 100cm)" =  list('1940-01-01',format(fecha_today-8))
+    "Precipitaci\u00F3n" = list('1940-01-01',format(fecha_today-9)),
+    "Temperatura m\u00E1xima" = list('1940-01-01',format(fecha_today-9)), 
+    "Temperatura m\u00EDnima"=  list('1940-01-01',format(fecha_today-9)), 
+    "Vientos u" =  list('1940-01-01',format(fecha_today-9)), 
+    "Vientos v" =  list('1940-01-01',format(fecha_today-9)),  
+    "Humedad del suelo (0 - 7cm)" =  list('1940-01-01',format(fecha_today-9)),  
+    "Humedad del suelo  (7 - 28cm)" =  list('1940-01-01',format(fecha_today-9)),  
+    "Humedad del suelo  (28 - 100cm)" =  list('1940-01-01',format(fecha_today-9))
   ),
-  "GPCC-ALL PRODUCTS" = list("Precipitaci\u00F3n" =  list('2009-01-01',format(fecha_today-4))
+  "GPCC-ALL PRODUCTS" = list("Precipitaci\u00F3n" =  list('2009-01-01',format(fecha_today-32))
   ),
   "NCAR/UCAR Reanalysis" = list(
     "Vientos u"= list('1948-01-01',format(fecha_today-2)), 
@@ -118,7 +123,7 @@ main_limites_fechas <- list(
     "Altura Geopotencial 850"=list('1948-01-01',format(fecha_today-2))
   ),
   "PERSIANN-CCS" = list("Precipitaci\u00F3n" =  list('2003-01-01',format(fecha_today-1))), 
-  "GPM (GPM_3IMERGDE)" = list("Precipitaci\u00F3n" =  list('2000-06-01',format(fecha_today-1)))
+  "GPM (GPM_3IMERGDE)" = list("Precipitaci\u00F3n" =  list('2000-06-01',format(fecha_today-30)))
 )
 
 
@@ -128,7 +133,7 @@ data <- data.frame(
     rep("ERA5 hourly data on single levels from 1940 to present", 8),
     "CHIRPS", 
     "GPCC-ALL PRODUCTS", 
-    rep("NASA- POWER", 6), 
+    rep("NASA-POWER", 6), 
     "CPC Global Unified Gauge-Based Analysis of Daily Precipitation", 
     rep("CPC Global Daily Temperature", 2),
     rep("NCAR/UCAR Reanalysis", 6),
@@ -153,7 +158,7 @@ data <- data.frame(
     rep("1979-presente", 3),
     rep("1948-presente", 6),
     "2003-presente", 
-    "Junio 2000-presente"
+    "06/2000-presente"
   ),
   `Dias de retraso` = c(
     rep("5-8 d\u00EDas", 8),
@@ -176,6 +181,10 @@ data <- data.frame(
     "Precipitaci\u00F3n", 
     "Precipitaci\u00F3n"
   ),
+  Unidad = c("m", "°C", "°C", "m/s", "m/s", "m³/m³", "m³/m³", "m³/m³", "mm", "mm", "°C", "°C", "%", "kg m⁻² s⁻¹", "1", "1", "mm", "°C", "°C", "m/s", "m/s", "Pascals", "millibar", "millibar", "millibar", "mm/day", "mm"),
+  
+  Precision = c("4", "1", "1", "1", "1", "6", "6", "6", "1", "1", "1", "1", "1", "6", "-", "-", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1"),
+  
   `Resolucion espacial` = c(
     rep("0.25x0.25", 8),
     "0.05x0.05",
