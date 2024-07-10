@@ -24,11 +24,77 @@ NASA_POWER$obtener_nombre_variable <- function(parametro) {
 }
 
 
-
 # Definir el número de núcleos a utilizar
 NASA_POWER$num_cores <- 2
 # Registrar el backend paralelo con el número de núcleos especificado
 registerDoParallel(NASA_POWER$num_cores)
+
+
+
+NASA_POWER$generate_raster_info_txt <- function(raster_path) {
+  closeAllConnections()
+  setwd(dirname(raster_path))
+  # Verificar si el archivo existe
+  if (!file.exists(raster_path)) {
+    stop("El archivo especificado no existe.")
+  }
+  
+  # Leer el raster
+  r <- stack(raster_path)
+  
+  # Extraer información
+  raster_info <- list(
+    class = class(r),
+    band = nlayers(r),
+    dimensions = dim(r),
+    resolution = res(r),
+    extent = extent(r),
+    crs = projection(r),
+    names = names(r)
+    
+  )
+  
+  # Extraer las fechas del nombre del archivo
+  raster_dir<- dirname(raster_path)
+  name_without_ext <-  substring(basename(raster_path),1, nchar(basename(raster_path)) - 4 )
+  file_name_parts <- unlist(strsplit(name_without_ext, "_"))
+  fecha_inicial <- file_name_parts[length(file_name_parts) - 1]
+  fecha_final <- file_name_parts[length(file_name_parts)]
+  
+  # Convertir la lista de información a un formato legible
+  base_text <- paste(
+    "Class: ", raster_info$class, "\n",
+    "Band: ", raster_info$band, "\n",
+    "Dimensions: ", paste(raster_info$dimensions, collapse = " x "), "\n",
+    "Resolution: ", paste(raster_info$resolution, collapse = ", "), "\n",
+    "Extent: ", paste(raster_info$extent[], collapse = ", "), "\n",
+    "CRS: ", raster_info$crs, "\n",
+    sep = ""
+  )
+  
+  # Crear la ruta para el archivo de texto con el mismo nombre pero extensión .txt
+  name_file <- file.path(raster_dir, paste0(name_without_ext, ".txt"))
+  output_file <- file(name_file, "w")
+  writeLines(base_text, output_file)
+  # Convertir las fechas a formato Date
+  fecha_inicial <- as.Date(fecha_inicial, format = "%Y-%m-%d")
+  fecha_final <- as.Date(fecha_final, format = "%Y-%m-%d")
+  
+  # Generar la secuencia de fechas
+  fechas <- seq(fecha_inicial, fecha_final, by = "day")
+  
+  # Añadir la información de las bandas y las fechas
+  for (i in 1:length(fechas)) {
+    linea <- paste("Banda ", sprintf("%03d", i), ": ", fechas[i], sep = "")
+    writeLines(linea, output_file)
+  }
+  close(output_file)
+  closeAllConnections()
+  return(basename(name_file))
+}
+
+
+
 
 NASA_POWER$generar_urls <- function(fecha_inicial, fecha_final){
   
@@ -103,10 +169,10 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
   directorio_temp <- NASA_POWER$crear_subdirectorios(url_base, 'temp')
   directorio_tif <- NASA_POWER$crear_subdirectorios(url_base, parametro, 'diario', 'tif')
   
-  name_outputFile <- paste0(lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
+  name_outputFile <- paste0("NASAPOWER_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
   outputFile <- file.path(directorio_tif, name_outputFile)
   
-  
+
   coordenadas_list <- list(
     VENEZUELA = c(lonL = -73.378, lonR = -59.8035,latB = 0.6499, latT = 12.8011 ),
     COLOMBIA = c(lonL = -81, lonR = -66.8694, latB = -4.2271,latT = 13.5),
@@ -218,19 +284,31 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
             # Define la extensión geográfica del raster
             extent(r) <- extension_correcta
             r[r<0] <- NA
-            r <- round(r, 1)
+            
+            
+            if (parametro=="PCP"){
+              r <- round(r, 6)
+            }else{
+              r <- round(r, 1)
+            }
+            
+            if (parametro=='TMAX' | parametro=="TMIN"){
+              r <- r-273.15
+            }
+            
+            
             #Recortar raster para cada pais
             for (num in 1:length(coordenadas_list)){
               raster_recortado <- raster::crop(r,  raster::extent(coordenadas_list[[num]]))
               file <- paste0(fecha,'.tif')
               output <- file.path(url_base, parametro, 'diario','PAIS',names(coordenadas_list)[num],file )
-              if (!file.exists(output)){
+              if (!existe(output)){
                 raster::writeRaster(raster_recortado, output, format = "GTiff", overwrite = TRUE)
                 print(paste("Archivo TIF guardado en:", output))
               }
               
             }
-            rm(r)
+   
             gc()
           },
           error = function(cond) {
@@ -253,13 +331,15 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
   
   
   setwd(dirname(outputFile))
+  out_txt <- NASA_POWER$generate_raster_info_txt(outputFile)
   # Crear el nombre del archivo zip con la misma basename pero extensión .zip
   zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
   # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = basename(outputFile))
-  
+  zip(zipfile, files = c(basename(outputFile), out_txt))
   
   return(zipfile)
 }
+
+
 
 

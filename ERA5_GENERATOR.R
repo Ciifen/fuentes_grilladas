@@ -8,6 +8,72 @@ library(ncdf4)
 
 ERA5 <- new.env()
 
+ERA5$generate_raster_info_txt <- function(raster_path) {
+  closeAllConnections()
+  setwd(dirname(raster_path))
+  # Verificar si el archivo existe
+  if (!file.exists(raster_path)) {
+    stop("El archivo especificado no existe.")
+  }
+  
+  # Leer el raster
+  r <- stack(raster_path)
+  
+  # Extraer información
+  raster_info <- list(
+    class = class(r),
+    band = nlayers(r),
+    dimensions = dim(r),
+    resolution = res(r),
+    extent = extent(r),
+    crs = projection(r),
+    names = names(r)
+ 
+  )
+  
+  # Extraer las fechas del nombre del archivo
+  raster_dir<- dirname(raster_path)
+  name_without_ext <-  substring(basename(raster_path),1, nchar(basename(raster_path)) - 4 )
+  file_name_parts <- unlist(strsplit(name_without_ext, "_"))
+  fecha_inicial <- file_name_parts[length(file_name_parts) - 1]
+  fecha_final <- file_name_parts[length(file_name_parts)]
+  
+  # Convertir la lista de información a un formato legible
+  base_text <- paste(
+    "Class: ", raster_info$class, "\n",
+    "Band: ", raster_info$band, "\n",
+    "Dimensions: ", paste(raster_info$dimensions, collapse = " x "), "\n",
+    "Resolution: ", paste(raster_info$resolution, collapse = ", "), "\n",
+    "Extent: ", paste(raster_info$extent[], collapse = ", "), "\n",
+    "CRS: ", raster_info$crs, "\n",
+    sep = ""
+  )
+  
+  # Crear la ruta para el archivo de texto con el mismo nombre pero extensión .txt
+  name_file <- file.path(raster_dir, paste0(name_without_ext, ".txt"))
+  output_file <- file(name_file, "w")
+  writeLines(base_text, output_file)
+
+  # Convertir las fechas a formato POSIXct para permitir la secuencia por hora
+  fecha_inicial <- as.POSIXct(paste0(fecha_inicial," 00:00:00"), format = "%Y-%m-%d %H:%M:%S")
+  fecha_final <- as.POSIXct(paste0(fecha_final," 23:00:00"), format = "%Y-%m-%d %H:%M:%S")
+  
+  # Generar la secuencia de fechas
+  fechas <- seq(fecha_inicial, fecha_final, by = "hour")
+  
+  # Añadir la información de las bandas y las fechas
+  for (i in 1:length(fechas)) {
+    linea <- paste("Banda ", sprintf("%03d", i), ": ", fechas[i], sep = "")
+    writeLines(linea, output_file)
+  }
+  close(output_file)
+  closeAllConnections()
+  return(basename(name_file))
+}
+
+
+
+
 #Funcion para crear subdirectorios
 ERA5$crear_subdirectorios <- function(base, ...) {
   subdirs <- c(base, list(...))
@@ -76,7 +142,7 @@ ERA5$downloads_transformar_a_tif <- function(Rango_fecha, pais_abreviado, parame
   urls_tif_filename <- paste0(url, '/',rango,'.tif')
   
   #Ruta del directorio donde se guarda el archivo solicitado por el usuario
-  name_outputFile <- paste0(lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
+  name_outputFile <- paste0("ERA5_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
   outputFile <- file.path(directorio_tif, name_outputFile)
   
   if (file.exists(outputFile)){
@@ -91,13 +157,15 @@ ERA5$downloads_transformar_a_tif <- function(Rango_fecha, pais_abreviado, parame
   
   
   setwd(dirname(outputFile))
+  out_txt <- ERA5$generate_raster_info_txt(outputFile)
   # Crear el nombre del archivo zip con la misma basename pero extensión .zip
   zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
   # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = basename(outputFile))
-  
+  zip(zipfile, files = c(basename(outputFile),out_txt))
+  print(paste(outputFile,out_txt ))
   
   return(zipfile)
 }
+
 
 

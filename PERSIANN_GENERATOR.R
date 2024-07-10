@@ -53,6 +53,68 @@ PERSIANN$generar_urls <- function(Rango_fecha){
   return(list(lista_urls = urls, urls_tif_filename = urls_tif_filename, fecha_inicial=fecha_inicial, fecha_final=fecha_final))
 }
 
+PERSIANN$generate_raster_info_txt <- function(raster_path) {
+  closeAllConnections()
+  setwd(dirname(raster_path))
+  # Verificar si el archivo existe
+  if (!file.exists(raster_path)) {
+    stop("El archivo especificado no existe.")
+  }
+  
+  # Leer el raster
+  r <- stack(raster_path)
+  
+  # Extraer información
+  raster_info <- list(
+    class = class(r),
+    band = nlayers(r),
+    dimensions = dim(r),
+    resolution = res(r),
+    extent = extent(r),
+    crs = projection(r),
+    names = names(r)
+    
+  )
+  
+  # Extraer las fechas del nombre del archivo
+  raster_dir<- dirname(raster_path)
+  name_without_ext <-  substring(basename(raster_path),1, nchar(basename(raster_path)) - 4 )
+  file_name_parts <- unlist(strsplit(name_without_ext, "_"))
+  fecha_inicial <- file_name_parts[length(file_name_parts) - 1]
+  fecha_final <- file_name_parts[length(file_name_parts)]
+  
+  # Convertir la lista de información a un formato legible
+  base_text <- paste(
+    "Class: ", raster_info$class, "\n",
+    "Band: ", raster_info$band, "\n",
+    "Dimensions: ", paste(raster_info$dimensions, collapse = " x "), "\n",
+    "Resolution: ", paste(raster_info$resolution, collapse = ", "), "\n",
+    "Extent: ", paste(raster_info$extent[], collapse = ", "), "\n",
+    "CRS: ", raster_info$crs, "\n",
+    sep = ""
+  )
+  
+  # Crear la ruta para el archivo de texto con el mismo nombre pero extensión .txt
+  name_file <- file.path(raster_dir, paste0(name_without_ext, ".txt"))
+  output_file <- file(name_file, "w")
+  writeLines(base_text, output_file)
+  # Convertir las fechas a formato Date
+  fecha_inicial <- as.Date(fecha_inicial, format = "%Y-%m-%d")
+  fecha_final <- as.Date(fecha_final, format = "%Y-%m-%d")
+  
+  # Generar la secuencia de fechas
+  fechas <- seq(fecha_inicial, fecha_final, by = "day")
+  
+  # Añadir la información de las bandas y las fechas
+  for (i in 1:length(fechas)) {
+    linea <- paste("Banda ", sprintf("%03d", i), ": ", fechas[i], sep = "")
+    writeLines(linea, output_file)
+  }
+  close(output_file)
+  closeAllConnections()
+  return(basename(name_file))
+}
+
 
 
 PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
@@ -74,16 +136,16 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   directorio_temp <- PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario', 'temp')
   directorio_tif <- PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario', 'tif')
   
-  name_outputFile <- paste0(lugar,'_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.tif')
+  name_outputFile <- paste0("PERSIANN_",lugar,'_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.tif')
   outputFile <- file.path(directorio_tif, name_outputFile)
   
   coordenadas_list <- list(
-    ven = c(lonL = -73.378, lonR = -59.8035,latB = 0.6499, latT = 12.2011 ),
-    col = c(lonL = -79.3667, lonR = -66.8694, latB = -4.2271,latT = 12.4583),
-    ecu = c(lonL = -81.0833, lonR = -75.1867,  latB = -5.014, latT = 1.6742),
-    per = c(lonL = -81.3269, lonR = -68.6651, latB = -18.3496, latT = 0.012),
-    bol = c(lonL = -69.6409, lonR = -57.453,  latB = -22.8969,latT = -9.6805),
-    chi = c(lonL = -75.6445, lonR = -66.4173, latB = -45, latT = -17.5065)
+    VENEZUELA = c(lonL = -73.378, lonR = -59.8035,latB = 0.6499, latT = 12.8011 ),
+    COLOMBIA = c(lonL = -81, lonR = -66.8694, latB = -4.2271,latT = 13.5),
+    ECUADOR = c(lonL = -91.38, lonR = -75.1867,  latB = -5.014, latT = 1.6742),
+    PERU = c(lonL = -81.3269, lonR = -68.6651, latB = -18.3496, latT = 0.012),
+    BOLIVIA = c(lonL = -69.6409, lonR = -57.453,  latB = -22.8969,latT = -9.6805),
+    CHILE = c(lonL = -109.5, lonR = -66.4173, latB = -60, latT = -17.5065)
   )
   
   urls_paises <- list(
@@ -94,8 +156,7 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
     bol = url_bolivia,
     chi = url_chile
   )
-  if (lugar %in% names(coordenadas_list)) {
-    coordenadas_pais <- coordenadas_list[[lugar]]
+  if (lugar %in% names(urls_paises)) {
     url_pais <- urls_paises[[lugar]]
   } else {
     stop("Lugar no válido")
@@ -158,25 +219,28 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
             # Extraer la fecha del nombre del archivo
             yyddd <- str_extract(basename(url), "(\\d{5})")
             fecha <- as.Date(yyddd, format = "%y%j")
-            # Construir el nombre de salida en el formato deseado
-            nombre_salida <- file.path(
-              url_pais,
-              paste0("persiann", format(fecha, "%Y%m%d"), ".tif")
-            )
-            # Definir la extensión (ajusta las coordenadas según tu necesidad)
-            extension_pais <- extent(coordenadas_pais)
+            
+            r[r<0] <- NA
+            r <- round(r, 1)
             
             
+            #Recortar raster para cada pais
+            for (num in 1:length(coordenadas_list)){
+              raster_recortado <- raster::crop(r,  raster::extent(coordenadas_list[[num]]))
+              nombre_salida <-  paste0("persiann", format(fecha, "%Y%m%d"), ".tif")
+              output <- file.path(url_base, "PREC", 'diario','PAIS',names(coordenadas_list)[num],nombre_salida )
+              if (!existe(output)){
+                raster::writeRaster(raster_recortado, output, format = "GTiff", overwrite = TRUE)
+                print(paste("Archivo TIF guardado en:", output))
+              }
+              
+            }
             
-            # Recortar el RasterStack
-            r <- crop(r, extension_pais)
-            
-            writeRaster(r, nombre_salida, format = "GTiff", overwrite = TRUE)
             # Elimina el archivo temporal .gri
             #file.remove(extension(f, "gri"))
             #file.remove(extension(fg, "grd"))
             #return("Descarga completada exitosamente.")
-            print(paste("Archivo TIF guardado en:", nombre_salida))
+            
           },
           error = function(cond) {
             # Si se produce una excepción, se maneja aquí
@@ -200,24 +264,13 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   
   
   setwd(dirname(outputFile))
+  out_txt <- NASA_POWER$generate_raster_info_txt(outputFile)
   # Crear el nombre del archivo zip con la misma basename pero extensión .zip
   zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
   # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = basename(outputFile))
+  zip(zipfile, files = c(basename(outputFile), out_txt))
   return(zipfile)
   
   
 }
-
-
-#PERSIANN$Rango_fecha <- list(as.Date("2023-09-02"), as.Date("2023-09-04"))
-#PERSIANN$lugar <- 'ven'
-
-#PERSIANN$downloads_transformar_a_tif(PERSIANN$Rango_fecha, 'ecu')
-#PERSIANN$downloads_transformar_a_tif(PERSIANN$Rango_fecha, 'per')
-#PERSIANN$downloads_transformar_a_tif(PERSIANN$Rango_fecha, 'chi')
-#PERSIANN$downloads_transformar_a_tif(PERSIANN$Rango_fecha, 'ven')
-#PERSIANN$downloads_transformar_a_tif(PERSIANN$Rango_fecha, 'bol')
-#PERSIANN$downloads_transformar_a_tif(PERSIANN$Rango_fecha, 'col')
-
 

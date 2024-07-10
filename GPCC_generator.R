@@ -25,6 +25,71 @@ GPCC$existe <- function(file) {
   }
 }
 
+GPCC$generate_raster_info_txt <- function(raster_path) {
+  closeAllConnections()
+  setwd(dirname(raster_path))
+  # Verificar si el archivo existe
+  if (!file.exists(raster_path)) {
+    stop("El archivo especificado no existe.")
+  }
+  
+  # Leer el raster
+  r <- stack(raster_path)
+  
+  # Extraer información
+  raster_info <- list(
+    class = class(r),
+    band = nlayers(r),
+    dimensions = dim(r),
+    resolution = res(r),
+    extent = extent(r),
+    crs = projection(r),
+    names = names(r)
+    
+  )
+  
+  # Extraer las fechas del nombre del archivo
+  raster_dir<- dirname(raster_path)
+  name_without_ext <-  substring(basename(raster_path),1, nchar(basename(raster_path)) - 4 )
+  file_name_parts <- unlist(strsplit(name_without_ext, "_"))
+  fecha_inicial <- file_name_parts[length(file_name_parts) - 1]
+  fecha_final <- file_name_parts[length(file_name_parts)]
+  
+  # Convertir la lista de información a un formato legible
+  base_text <- paste(
+    "Class: ", raster_info$class, "\n",
+    "Band: ", raster_info$band, "\n",
+    "Dimensions: ", paste(raster_info$dimensions, collapse = " x "), "\n",
+    "Resolution: ", paste(raster_info$resolution, collapse = ", "), "\n",
+    "Extent: ", paste(raster_info$extent[], collapse = ", "), "\n",
+    "CRS: ", raster_info$crs, "\n",
+    sep = ""
+  )
+  
+  # Crear la ruta para el archivo de texto con el mismo nombre pero extensión .txt
+  name_file <- file.path(raster_dir, paste0(name_without_ext, ".txt"))
+  output_file <- file(name_file, "w")
+  writeLines(base_text, output_file)
+  # Convertir las fechas a formato Date
+  fecha_inicial <- as.Date(fecha_inicial, format = "%Y-%m-%d")
+  fecha_final <- as.Date(fecha_final, format = "%Y-%m-%d")
+  
+  # Generar la secuencia de fechas
+  fechas <- seq(fecha_inicial, fecha_final, by = "day")
+  
+  # Añadir la información de las bandas y las fechas
+  for (i in 1:length(fechas)) {
+    linea <- paste("Banda ", sprintf("%03d", i), ": ", fechas[i], sep = "")
+    writeLines(linea, output_file)
+  }
+  close(output_file)
+  closeAllConnections()
+  return(basename(name_file))
+}
+
+
+
+
 
 GPCC$generar_urls <- function(fecha_inicial, fecha_final){
   
@@ -87,8 +152,6 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   registerDoParallel(num_cores)
   
   
-  
-  
   fecha_inicial <- Rango_fecha[[1]]
   fecha_final <- Rango_fecha[[2]]
   
@@ -112,11 +175,8 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   directorio_temp <- GPCC$crear_subdirectorios(url_base, 'PREC', 'diario', 'temp')
   directorio_tif <- GPCC$crear_subdirectorios(url_base, 'PREC', 'diario', 'tif')
   
-  name_outputFile <- paste0(lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
+  name_outputFile <- paste0("GPCC_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
   outputFile <- file.path(directorio_tif, name_outputFile)
-  
-  
-  
   
   
   coordenadas_list <- list(
@@ -147,7 +207,6 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   if (file.exists(outputFile)){
     message("Ya se encuentra el archivo generado")
     # Detenemos la ejecución del script
-    #return(NULL)
   } else{
     
     
@@ -158,16 +217,22 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
       file_temp <- paste0(directorio_temp, '/', basename(url))
       setwd(directorio_temp)
       
-
-      
-      
-      if (!existe(paste0(file_temp))) {
+      if (!GPCC$existe(paste0(file_temp))) {
         print('No se encuentra descargado')
-        
-        system(paste0("wget --no-check-certificate --load-cookies ~/.urs_cookies --save-cookies ~/.urs_cookies --keep-session-cookies --content-disposition ", url))
+        tryCatch(
+          {
+            system(paste0("wget --no-check-certificate --load-cookies ~/.urs_cookies --save-cookies ~/.urs_cookies --keep-session-cookies --content-disposition ", url))
+          },
+          error = function(cond) {
+            # Si se produce una excepción, se maneja aquí
+            print(paste("Error:", cond$message))
+          }
+        )
       }else{
         print('Ya se encuentra descargado')
       }
+      
+      
     }
     
     #Procesar archivo nc.gz mensual a tif diario
@@ -238,24 +303,17 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
     setwd(url_pais)
     raster_data <- stack(urls_tif_filename)
     writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
-    
   }
 
-  
   setwd(dirname(outputFile))
+  out_txt <- GPCC$generate_raster_info_txt(outputFile)
   # Crear el nombre del archivo zip con la misma basename pero extensión .zip
   zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
   # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = basename(outputFile))
+  zip(zipfile, files = c(basename(outputFile),out_txt))
   
   return(zipfile)
 }
-
-
-
-GPCC$Rango_fecha <- list(as.Date("2023-04-15"), as.Date("2023-04-15"))
-GPCC$lugar <- 'ecu'
-#GPCC$downloads_transformar_a_tif(GPCC$Rango_fecha, GPCC$lugar)
 
 
 

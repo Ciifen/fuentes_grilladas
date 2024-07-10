@@ -7,6 +7,68 @@ library(httr)
 
 CHIRPS <- new.env()
 
+CHIRPS$generate_raster_info_txt <- function(raster_path) {
+
+  closeAllConnections()
+  setwd(dirname(raster_path))
+  # Verificar si el archivo existe
+  if (!file.exists(raster_path)) {
+    stop("El archivo especificado no existe.")
+  }
+  
+  # Leer el raster
+  r <- stack(raster_path)
+  
+  # Extraer información
+  raster_info <- list(
+    class = class(r),
+    band = nlayers(r),
+    dimensions = dim(r),
+    resolution = res(r),
+    extent = extent(r),
+    crs = projection(r),
+    names = names(r)
+    
+  )
+  
+  # Extraer las fechas del nombre del archivo
+  raster_dir<- dirname(raster_path)
+  name_without_ext <-  substring(basename(raster_path),1, nchar(basename(raster_path)) - 4 )
+  file_name_parts <- unlist(strsplit(name_without_ext, "_"))
+  fecha_inicial <- file_name_parts[length(file_name_parts) - 1]
+  fecha_final <- file_name_parts[length(file_name_parts)]
+  
+  # Convertir la lista de información a un formato legible
+  base_text <- paste(
+    "Class: ", raster_info$class, "\n",
+    "Band: ", raster_info$band, "\n",
+    "Dimensions: ", paste(raster_info$dimensions, collapse = " x "), "\n",
+    "Resolution: ", paste(raster_info$resolution, collapse = ", "), "\n",
+    "Extent: ", paste(raster_info$extent[], collapse = ", "), "\n",
+    "CRS: ", raster_info$crs, "\n",
+    sep = ""
+  )
+  
+  # Crear la ruta para el archivo de texto con el mismo nombre pero extensión .txt
+  name_file <- file.path(raster_dir, paste0(name_without_ext, ".txt"))
+  output_file <- file(name_file, "w")
+  writeLines(base_text, output_file)
+  # Convertir las fechas a formato Date
+  fecha_inicial <- as.Date(fecha_inicial, format = "%Y-%m-%d")
+  fecha_final <- as.Date(fecha_final, format = "%Y-%m-%d")
+
+  # Generar la secuencia de fechas
+  fechas <- seq(fecha_inicial, fecha_final, by = "day")
+
+  # Añadir la información de las bandas y las fechas
+  for (i in 1:length(fechas)) {
+    linea <- paste("Banda ", sprintf("%03d", i), ": ", fechas[i], sep = "")
+    writeLines(linea, output_file)
+  }
+  close(output_file)
+  closeAllConnections()
+  return(basename(name_file))
+}
 
 #Funcion para crear subdirectorios
 CHIRPS$crear_subdirectorios <- function(base, ...) {
@@ -81,7 +143,7 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   }
   
   
-  
+
   fecha_inicial <- Rango_fecha[[1]]
   fecha_final <- Rango_fecha[[2]]
 
@@ -142,7 +204,10 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   archivos <- list.files()
 
   fecha_data_fool <- gsub(archivos,pattern = 'chirps-v2.0.',replacement = '')
+  
   fecha_data <- substr(fecha_data_fool,start = 1,stop = 10)
+  
+
   fechas_necesarias <-  seq(fecha_inicial, fecha_final, by = "day")
 
   c=0
@@ -368,12 +433,12 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
     file_selected <- todas_necesarias
     fecha_inicial_str <- format(fecha_inicial, format='%Y-%m-%d')
     fecha_final_str <- format(fecha_final, format='%Y-%m-%d')
-    name_zip_file2 <- paste0(temp_dir,'/CHIRPS-V2.0.',fecha_inicial_str,'_',fecha_final_str,'_',lugar,'.tif')
-    archivo_nombre <- paste0('CHIRPS-V2.0.',fecha_inicial_str,'_',fecha_final_str,'_',lugar,'.tif')
+    name_zip_file2 <- paste0(temp_dir,'/CHIRPS-V2.0.','_',lugar,'_','pcp','_',fecha_inicial_str,'_',fecha_final_str,'.tif')
+   
   }else{
     file_selected <- todas_necesarias
-    name_zip_file2 <- paste0(temp_dir,'/CHIRPS-V2.0.',fecha_inicial_str,'_',lugar,'.tif')
-    archivo_nombre <- paste0('CHIRPS-V2.0.',fecha_inicial_str,'_',lugar,'.tif')
+    name_zip_file2 <- paste0(temp_dir,'/CHIRPS-V2.0.','_',lugar,'_','pcp','_',fecha_inicial_str,'_',fecha_inicial_str,'.tif')
+   
   }
   print('Generando nombres.... completo')
   gc()
@@ -408,10 +473,12 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   
   setwd(dirname(name_zip_file2))
   # Crear el nombre del archivo zip con la misma base pero extensión .zip
+  
+  out_txt <- CHIRPS$generate_raster_info_txt(name_zip_file2)
   zipfile <- sub("\\.tif$", ".zip", basename(name_zip_file2))
   
   # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = basename(name_zip_file2))
+  zip(zipfile, files = c(basename(name_zip_file2),out_txt))
 
   
   return(zipfile)
