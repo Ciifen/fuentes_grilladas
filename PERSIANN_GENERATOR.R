@@ -3,11 +3,29 @@ library(curl)
 library(raster)
 library(parallel)
 library(stringr)
-library(RCurl)
 library(doParallel)
 library(foreach)
+#library(RCurl)
+
+library(future)
+plan(multisession)
 
 PERSIANN <- new.env()
+
+#La funcion valida si el archivo existe y es mayor a 0 el tama;o
+PERSIANN$existe <- function(file) {
+  if (file.exists(file)) {
+    if (file.info(file)$size > 0) {
+      return(TRUE)
+    } else {
+      file.remove(file)
+      return(FALSE)
+    }
+  } else {
+    return(FALSE)
+  }
+}
+
 
 #Funcion para crear subdirectorios
 PERSIANN$crear_subdirectorios <- function(base, ...) {
@@ -54,7 +72,7 @@ PERSIANN$generar_urls <- function(Rango_fecha){
 }
 
 PERSIANN$generate_raster_info_txt <- function(raster_path) {
-  closeAllConnections()
+  #closeAllConnections()
   setwd(dirname(raster_path))
   # Verificar si el archivo existe
   if (!file.exists(raster_path)) {
@@ -111,7 +129,7 @@ PERSIANN$generate_raster_info_txt <- function(raster_path) {
     writeLines(linea, output_file)
   }
   close(output_file)
-  closeAllConnections()
+  #closeAllConnections()
   return(basename(name_file))
 }
 
@@ -123,7 +141,7 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/opt/shiny-server/samples/sample-apps/app_bases/PERSIANN'
+  url_base <- '/srv/shiny-server/datosgrillados/PERSIANN'
   PERSIANN$crear_subdirectorios(url_base, 'PREC')
   PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario')
   PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario','PAIS')
@@ -137,7 +155,10 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   directorio_tif <- PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario', 'tif')
   
   name_outputFile <- paste0("PERSIANN_",lugar,'_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.tif')
+  name_outputFile_zip <- paste0("PERSIANN_",lugar,'_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.zip')
+  
   outputFile <- file.path(directorio_tif, name_outputFile)
+  outputFile_zip <- file.path(directorio_tif, name_outputFile)
   
   coordenadas_list <- list(
     VENEZUELA = c(lonL = -73.378, lonR = -59.8035,latB = 0.6499, latT = 12.8011 ),
@@ -162,114 +183,139 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
     stop("Lugar no válido")
   }
   
-
   
   
-  if (file.exists(outputFile)){
+  if (PERSIANN$existe(outputFile_zip)){
     message(paste0("Ya se encuentra el archivo generado"), outputFile)
     # Detenemos la ejecución del script
     #return(NULL)
     
   }else{
     
-    for (i in seq_along(urls)) {
-      url <- urls[i][[1]]
-      url_tif_filename <-paste0(url_pais,'/' ,urls_tif_filename[i][[1]]) 
-      print(paste("Processing URL:", url, ' tif:', url_tif_filename))
+    future({
       
+      library(R.utils)
+      library(curl)
+      library(raster)
+      library(parallel)
+      library(stringr)
+      library(doParallel)
+      library(foreach)
       
-      #La funcion valida si el archivo existe y es mayor a 0 el tama;o
-      existe <- function(file) {
-        if (file.exists(file)) {
-          if (file.info(file)$size > 0) {
-            return(TRUE)
+      for (i in seq_along(urls)) {
+        url <- urls[i][[1]]
+        url_tif_filename <-paste0(url_pais,'/' ,urls_tif_filename[i][[1]]) 
+        print(paste("Processing URL:", url, ' tif:', url_tif_filename))
+        
+        #La funcion valida si el archivo existe y es mayor a 0 el tama;o
+        existe <- function(file) {
+          if (file.exists(file)) {
+            if (file.info(file)$size > 0) {
+              return(TRUE)
+            } else {
+              file.remove(file)
+              return(FALSE)
+            }
           } else {
-            file.remove(file)
             return(FALSE)
           }
-        } else {
-          return(FALSE)
         }
-      }
-      
-      #process_url <- function(url, url_tif_filename) {
-      if (!existe(url_tif_filename)) {
-        # El archivo .tif no existe, descárgalo y procesa
-        tryCatch(
-          {
-            base <- file.path(directorio_temp, paste0("base_", gsub("\\.tif$", "",basename(url_tif_filename)), ".grd"))
-            # generar mascara 0.04
-            r <- raster(xmn=0, xmx=360, ymn=-60, ymx=60, nrow=3000, ncol=9000, crs="+proj=longlat +datum=WGS84")
-            values(r) <- 1
-            r <- writeRaster(r, base, datatype="FLT4S", overwrite=TRUE)
-            x <- readLines(base)
-            x[grep("byteorder", x)] <- "byteorder=big"
-            x[grep("nodatavalue", x)] <- "nodatavalue=-9999"
-            writeLines(x, base)
-            archivo_temporal <- file.path(directorio_temp, basename(url))
-            curl_download(url, archivo_temporal)
-            R.utils::gunzip(archivo_temporal)
-            f <- gsub("\\.gz$", "", archivo_temporal)
-            file.rename(f, extension(f, "gri"))
-            fg <- extension(f, "grd") 
-            file.copy(base, fg)
-            # Limitar los valores a un decimal
-            r <- raster(fg) * 1
-            r <- rotate(r)
-            # Extraer la fecha del nombre del archivo
-            yyddd <- str_extract(basename(url), "(\\d{5})")
-            fecha <- as.Date(yyddd, format = "%y%j")
-            
-            r[r<0] <- NA
-            r <- round(r, 1)
-            
-            
-            #Recortar raster para cada pais
-            for (num in 1:length(coordenadas_list)){
-              raster_recortado <- raster::crop(r,  raster::extent(coordenadas_list[[num]]))
-              nombre_salida <-  paste0("persiann", format(fecha, "%Y%m%d"), ".tif")
-              output <- file.path(url_base, "PREC", 'diario','PAIS',names(coordenadas_list)[num],nombre_salida )
-              if (!existe(output)){
-                raster::writeRaster(raster_recortado, output, format = "GTiff", overwrite = TRUE)
-                print(paste("Archivo TIF guardado en:", output))
+        
+        #process_url <- function(url, url_tif_filename) {
+        if (!existe(url_tif_filename)) {
+          # El archivo .tif no existe, descárgalo y procesa
+          tryCatch(
+            {
+              base <- file.path(directorio_temp, paste0("base_", gsub("\\.tif$", "",basename(url_tif_filename)), ".grd"))
+              # generar mascara 0.04
+              r <- raster(xmn=0, xmx=360, ymn=-60, ymx=60, nrow=3000, ncol=9000, crs="+proj=longlat +datum=WGS84")
+              values(r) <- 1
+              r <- writeRaster(r, base, datatype="FLT4S", overwrite=TRUE)
+              x <- readLines(base)
+              x[grep("byteorder", x)] <- "byteorder=big"
+              x[grep("nodatavalue", x)] <- "nodatavalue=-9999"
+              writeLines(x, base)
+              archivo_temporal <- file.path(directorio_temp, basename(url))
+              curl_download(url, archivo_temporal)
+              R.utils::gunzip(archivo_temporal)
+              f <- gsub("\\.gz$", "", archivo_temporal)
+              file.rename(f, extension(f, "gri"))
+              fg <- extension(f, "grd") 
+              file.copy(base, fg)
+              # Limitar los valores a un decimal
+              r <- raster(fg) * 1
+              r <- rotate(r)
+              # Extraer la fecha del nombre del archivo
+              yyddd <- str_extract(basename(url), "(\\d{5})")
+              fecha <- as.Date(yyddd, format = "%y%j")
+              
+              r[r<0] <- NA
+              r <- round(r, 1)
+              
+              
+              #Recortar raster para cada pais
+              for (num in 1:length(coordenadas_list)){
+                raster_recortado <- raster::crop(r,  raster::extent(coordenadas_list[[num]]))
+                nombre_salida <-  paste0("persiann", format(fecha, "%Y%m%d"), ".tif")
+                output <- file.path(url_base, "PREC", 'diario','PAIS',names(coordenadas_list)[num],nombre_salida )
+                if (!existe(output)){
+                  raster::writeRaster(raster_recortado, output, format = "GTiff", overwrite = TRUE)
+                  print(paste("Archivo TIF guardado en:", output))
+                }
+                
               }
               
+              # Elimina el archivo temporal .gri
+              #file.remove(extension(f, "gri"))
+              #file.remove(extension(fg, "grd"))
+              #return("Descarga completada exitosamente.")
+              
+            },
+            error = function(cond) {
+              # Si se produce una excepción, se maneja aquí
+              print(paste("Error:", cond$message))
             }
-            
-            # Elimina el archivo temporal .gri
-            #file.remove(extension(f, "gri"))
-            #file.remove(extension(fg, "grd"))
-            #return("Descarga completada exitosamente.")
-            
-          },
-          error = function(cond) {
-            # Si se produce una excepción, se maneja aquí
-            print(paste("Error:", cond$message))
-          }
-        )
-      } else {
-        # El archivo .tif ya existe en la carpeta, omite la descarga y procesamiento
-        print(paste("El archivo TIF ya existe en:", url_tif_filename))
+          )
+        } else {
+          # El archivo .tif ya existe en la carpeta, omite la descarga y procesamiento
+          print(paste("El archivo TIF ya existe en:", url_tif_filename))
+        }
+        
+        #}
       }
       
-      #}
-    }
+      setwd(url_pais)
+      raster_data <- stack(urls_tif_filename)
+      writeRaster(raster_data, filename=outputFile, overwrite=TRUE) 
+      
+      setwd(dirname(outputFile))
+      out_txt <- PERSIANN$generate_raster_info_txt(outputFile)
+      # Crear el nombre del archivo zip con la misma basename pero extensión .zip
+      zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
+      # Comprimir el archivo raster en un archivo zip
+      zip(zipfile, files = c(basename(outputFile), out_txt))
+      
+    }, globals = list(
+      urls = urls,
+      urls_tif_filename=urls_tif_filename,
+      url_base=url_base,
+      url_pais=url_pais,
+      directorio_temp = directorio_temp,
+      outputFile = outputFile,
+      coordenadas_list = coordenadas_list,
+      directorio_tif = directorio_tif,
+      PERSIANN = PERSIANN
+    ))
     
     
-    setwd(url_pais)
-    raster_data <- stack(urls_tif_filename)
-    writeRaster(raster_data, filename=outputFile, overwrite=TRUE) 
+    
   }
   
   
   
-  setwd(dirname(outputFile))
-  out_txt <- NASA_POWER$generate_raster_info_txt(outputFile)
-  # Crear el nombre del archivo zip con la misma basename pero extensión .zip
-  zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
-  # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = c(basename(outputFile), out_txt))
-  return(zipfile)
+  
+  
+  return(outputFile_zip)
   
   
 }

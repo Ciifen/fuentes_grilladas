@@ -3,16 +3,33 @@ library(curl)
 library(raster)
 library(parallel)
 library(stringr)
-library(RCurl)
 library(ncdf4)
+#library(RCurl)
+
+
+library(future)
+plan(multisession)
 
 ERA5 <- new.env()
+#La funcion valida si el archivo existe y es mayor a 0 el tama;o
+ERA5$existe <- function(file) {
+  if (file.exists(file)) {
+    if (file.info(file)$size > 0) {
+      return(TRUE)
+    } else {
+      file.remove(file)
+      return(FALSE)
+    }
+  } else {
+    return(FALSE)
+  }
+}
 
 ERA5$generate_raster_info_txt <- function(raster_path) {
-  closeAllConnections()
+  #closeAllConnections()
   setwd(dirname(raster_path))
   # Verificar si el archivo existe
-  if (!file.exists(raster_path)) {
+  if (!ERA5$existe(raster_path)) {
     stop("El archivo especificado no existe.")
   }
   
@@ -67,7 +84,7 @@ ERA5$generate_raster_info_txt <- function(raster_path) {
     writeLines(linea, output_file)
   }
   close(output_file)
-  closeAllConnections()
+  #closeAllConnections()
   return(basename(name_file))
 }
 
@@ -91,7 +108,7 @@ ERA5$crear_subdirectorios <- function(base, ...) {
 
 
 #Crear carpetas
-ERA5$url_base <- '/opt/shiny-server/samples/sample-apps/app_bases/ERA5'
+ERA5$url_base <- '/srv/shiny-server/datosgrillados/ERA5'
 ERA5$parametros <- c('u100', 'v100', 'mx2t', 'mn2t', 'tp','swvl1','swvl2','swvl3')
 
 for (parametro in ERA5$parametros){
@@ -129,7 +146,7 @@ ERA5$downloads_transformar_a_tif <- function(Rango_fecha, pais_abreviado, parame
   
   
   #Ruta del directorio de trabajo
-  url_base <- '/opt/shiny-server/samples/sample-apps/app_bases/ERA5'
+  url_base <- '/srv/shiny-server/datosgrillados/ERA5'
   directorio_tif <- ERA5$crear_subdirectorios(url_base, parametro, 'diario', 'tif')#Ruta archivo tif para descarga
   
   #Ruta del directorio donde se encuentra archivos solicitdos considera el lugar y paraemtro
@@ -143,28 +160,54 @@ ERA5$downloads_transformar_a_tif <- function(Rango_fecha, pais_abreviado, parame
   
   #Ruta del directorio donde se guarda el archivo solicitado por el usuario
   name_outputFile <- paste0("ERA5_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
+  name_outputFile_zip <- paste0("ERA5_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.zip')
   outputFile <- file.path(directorio_tif, name_outputFile)
+  outputFile_zip <- file.path(directorio_tif, name_outputFile_zip)
   
-  if (file.exists(outputFile)){
+  if (ERA5$existe(outputFile_zip)){
     message("Ya se encuentra el archivo generado")
     # Detenemos la ejecución del script
     #return(NULL)
   }else{
-    raster_data <- stack(urls_tif_filename)
-    writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
-    print(paste0("Archivo generado: ", outputFile))
+    
+
+    future({
+      
+      library(R.utils)
+      library(curl)
+      library(raster)
+      library(parallel)
+      library(stringr)
+      library(ncdf4)
+      
+      raster_data <- stack(urls_tif_filename)
+      writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+      print(paste0("Archivo generado: ", outputFile))
+      
+      setwd(dirname(outputFile))
+      out_txt <- ERA5$generate_raster_info_txt(outputFile)
+      # Crear el nombre del archivo zip con la misma basename pero extensión .zip
+      zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
+      # Comprimir el archivo raster en un archivo zip
+      zip(zipfile, files = c(basename(outputFile),out_txt))
+      
+    }, globals = list(
+      urls_tif_filename = urls_tif_filename,
+      outputFile = outputFile,
+      directorio_tif = directorio_tif,
+      ERA5 = ERA5,
+      name_paises = name_paises,
+      fecha_inicial = fecha_inicial,
+      fecha_final = fecha_final
+    ))
+
+    
   }
   
+
+
   
-  setwd(dirname(outputFile))
-  out_txt <- ERA5$generate_raster_info_txt(outputFile)
-  # Crear el nombre del archivo zip con la misma basename pero extensión .zip
-  zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
-  # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = c(basename(outputFile),out_txt))
-  print(paste(outputFile,out_txt ))
-  
-  return(zipfile)
+  return(outputFile_zip)
 }
 
 

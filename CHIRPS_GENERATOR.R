@@ -4,15 +4,34 @@ library(parallel)
 library(doParallel)
 library(httr)
 
+library(future)
+plan(multisession)
 
 CHIRPS <- new.env()
 
-CHIRPS$generate_raster_info_txt <- function(raster_path) {
 
-  closeAllConnections()
+
+#La funcion valida si el archivo existe y es mayor a 0 el tama;o
+CHIRPS$existe <- function(file) {
+  if (file.exists(file)) {
+    if (file.info(file)$size > 0) {
+      return(TRUE)
+    } else {
+      file.remove(file)
+      return(FALSE)
+    }
+  } else {
+    return(FALSE)
+  }
+}
+
+
+CHIRPS$generate_raster_info_txt <- function(raster_path) {
+  
+  #closeAllConnections()
   setwd(dirname(raster_path))
   # Verificar si el archivo existe
-  if (!file.exists(raster_path)) {
+  if (!CHIRPS$existe(raster_path)) {
     stop("El archivo especificado no existe.")
   }
   
@@ -56,17 +75,17 @@ CHIRPS$generate_raster_info_txt <- function(raster_path) {
   # Convertir las fechas a formato Date
   fecha_inicial <- as.Date(fecha_inicial, format = "%Y-%m-%d")
   fecha_final <- as.Date(fecha_final, format = "%Y-%m-%d")
-
+  
   # Generar la secuencia de fechas
   fechas <- seq(fecha_inicial, fecha_final, by = "day")
-
+  
   # Añadir la información de las bandas y las fechas
   for (i in 1:length(fechas)) {
     linea <- paste("Banda ", sprintf("%03d", i), ": ", fechas[i], sep = "")
     writeLines(linea, output_file)
   }
   close(output_file)
-  closeAllConnections()
+  #closeAllConnections()
   return(basename(name_file))
 }
 
@@ -128,7 +147,8 @@ CHIRPS$write_raster_parallel <- function(raster, filename) {
 }
 
 CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
-
+  
+  
   existe <- function(file) {
     if (file.exists(file)) {
       if (file.info(file)$size > 0) {
@@ -143,11 +163,10 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   }
   
   
-
   fecha_inicial <- Rango_fecha[[1]]
   fecha_final <- Rango_fecha[[2]]
-
-  MainDir='/opt/shiny-server/samples/sample-apps/app_bases'
+  
+  MainDir='/srv/shiny-server/datosgrillados'
   DirPath <- paste0(MainDir,'/','CHIRPS')
   dir.create(path = paste0(MainDir,'/','CHIRPS'),showWarnings = F)
   system(paste("chmod 7777", DirPath))
@@ -164,7 +183,7 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   dir.create(path = temp_dir,showWarnings = F)
   Sys.chmod(temp_dir, mode = "7777", use_umask = FALSE)
   
-  url_base <- '/opt/shiny-server/samples/sample-apps/app_bases/CHIRPS'
+  url_base <- '/srv/shiny-server/datosgrillados/CHIRPS'
   url_bolivia <- CHIRPS$crear_subdirectorios(url_base, 'diario','PAIS', 'BOLIVIA')
   url_chile <- CHIRPS$crear_subdirectorios(url_base, 'diario','PAIS','CHILE')
   url_colombia <- CHIRPS$crear_subdirectorios(url_base, 'diario','PAIS','COLOMBIA')
@@ -173,14 +192,15 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   url_peru <- CHIRPS$crear_subdirectorios(url_base, 'diario','PAIS','PERU')
   
   print('Cargando funciones completo')
-  cores=4
+  
+  
   coordenadas_list <- list(
-    ven = c(lonL = -73.378, lonR = -59.8035, latT = 12.2011, latB = 0.6499 ),
-    col = c(lonL = -79.3667, lonR = -66.8694, latT = 12.4583, latB = -4.2271),
-    ecu = c(lonL = -81.0833, lonR = -75.1867, latT = 1.6742, latB = -5.014 ),
+    ven = c(lonL = -73.378, lonR = -59.8035, latT = 12.8011 ,latB = 0.6499),
+    col = c(lonL = -81, lonR = -66.8694,latT = 13.5, latB = -4.2271),
+    ecu = c(lonL = -91.38, lonR = -75.1867, latT = 1.6742,  latB = -5.014),
     per = c(lonL = -81.3269, lonR = -68.6651, latT = 0.012, latB = -18.3496),
-    bol = c(lonL = -69.6409, lonR = -57.453, latT = -9.6805, latB = -22.8969),
-    chi = c(lonL = -75.6445, lonR = -66.4173, latT = -17.5065, latB = -50)
+    bol = c(lonL = -69.6409, lonR = -57.453,latT = -9.6805,  latB = -22.8969),
+    chi = c(lonL = -109.5, lonR = -66.4173, latT = -17.5065, latB = -50)
   )
   
   urls_paises <- list(
@@ -198,18 +218,48 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   } else {
     stop("Lugar no válido")
   }
+  
+  fecha_inicial_str <- format(fecha_inicial, format='%Y-%m-%d')
+  fecha_final_str <- format(fecha_final, format='%Y-%m-%d')
+  name_zip_file2 <- paste0(temp_dir,'/CHIRPS-V2.0.','_',lugar,'_','pcp','_',fecha_inicial_str,'_',fecha_final_str,'.tif')
+  outputFile_zip <- paste0(temp_dir,'/CHIRPS-V2.0.','_',lugar,'_','pcp','_',fecha_inicial_str,'_',fecha_final_str,'.zip')
+  
+  generar <- NULL
+  if (CHIRPS$existe(outputFile_zip)){
+    if (as.Date(file.info(outputFile_zip)$ctime) == Sys.Date()){
+      generar <- FALSE #Archivo existe y con fecha de hoy
+    }else{
+      generar <- TRUE
+    }
+  }
+  else{
+    generar <- TRUE
+  }
+  
+  if (generar==FALSE){
+      message("Ya se encuentra el archivo generado")
+      # Detenemos la ejecución del script
+  }else{
+    
+    future({
+      
+      library(lubridate)
+      library(raster)
+      library(parallel)
+      library(doParallel)
+      library(httr)
+      
 
   coordenadas_aux <- coordenadas_pais
   setwd(url_pais)
   archivos <- list.files()
-
+  
   fecha_data_fool <- gsub(archivos,pattern = 'chirps-v2.0.',replacement = '')
   
   fecha_data <- substr(fecha_data_fool,start = 1,stop = 10)
   
-
   fechas_necesarias <-  seq(fecha_inicial, fecha_final, by = "day")
-
+  
   c=0
   c1=0
   CHIRPS$name_file_faltantes <- NULL
@@ -264,18 +314,18 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
         #primera_linea_chirps <- head(grep("chirps-v2.0", lineas, value = TRUE), n = 1)
         
         # Buscar la última línea que contiene "chirps-v2.0"
-
+        
         ultima_linea_chirps <- tail(grep("chirps-v2.0", lineas, value = TRUE), n = 1)
         posicion_chirps <- regexpr("chirps-v2.0.", ultima_linea_chirps)
         fecha_end_html_fool1 <- substr(ultima_linea_chirps,start =posicion_chirps[1]+12,stop = posicion_chirps[1]+21 )
-
+        
         fecha_end_html <- as.Date(gsub(fecha_end_html_fool1,pattern = '[.]',replacement = '-'))
-  
+        
         # Imprimir la última línea que contiene "chirps-v2.0"
       } else {
         #cat("Error al descargar la página..")
       }
-  
+      
       # Real Link
       # URL de la página web
       url_real<-  paste0('https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_daily/tifs/p05/',Year_st,'/')
@@ -293,13 +343,13 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
         fecha_end_html_fool1 <- substr(ultima_linea_chirps,start =posicion_chirps[1]+12,stop = posicion_chirps[1]+21 )
         
         fecha_end_html_real <- as.Date(gsub(fecha_end_html_fool1,pattern = '[.]',replacement = '-'))
-    
+        
         num_flag <- length(fecha_end_html_real)
         
         if(num_flag==0){
           
           url_real<-  paste0('https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_daily/tifs/p05/',as.numeric(Year_st)-1,'/')
-   
+          
           response <- GET(url_real, config(ssl_verifypeer = FALSE))
           
           contenido <- content(response, "text")
@@ -359,7 +409,7 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
     CHIRPS$name_file_faltantes2 <- paste0(CHIRPS$name_file_faltantes,'.gz')
     
     #Descargando datos en paralelo
-    num_cores <- 2
+    num_cores <- 1
     # Calcular el número de archivos por núcleo
     # Iniciar el clúster para ejecutar en paralelo
     cl <- makeCluster(num_cores)
@@ -383,7 +433,7 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
     }
     #-------------------------------------------------------
     #Cortando archivos 
-    num_cores <- 2
+    num_cores <- 1
     
     # Calcular el n?mero de archivos por n?cleo
     num_archivos <- length( CHIRPS$name_file_faltantes)
@@ -408,7 +458,7 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
     #extent(ec_prec_total) <- c(-180,180,-90,90)
     num_date <- length(names( CHIRPS$ec_prec_total))
     # Configuración de paralelización para cortar datos
-    num_cores <- 2 # Utiliza el número de núcleos disponibles
+    num_cores <- 1 # Utiliza el número de núcleos disponibles
     cl <- makeCluster(num_cores) # Crea el clúster de núcleos
     # Exporta los objetos necesarios al clúster
     clusterExport(cl, "CHIRPS") 
@@ -425,25 +475,16 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
     
   }
   
-  
   #Uniendo los archivo que si están con los que no
   todas_necesarias <- c( CHIRPS$name_file_existentes, CHIRPS$name_file_faltantes)
   
-  if(length(Rango_fecha)==2){
-    file_selected <- todas_necesarias
-    fecha_inicial_str <- format(fecha_inicial, format='%Y-%m-%d')
-    fecha_final_str <- format(fecha_final, format='%Y-%m-%d')
-    name_zip_file2 <- paste0(temp_dir,'/CHIRPS-V2.0.','_',lugar,'_','pcp','_',fecha_inicial_str,'_',fecha_final_str,'.tif')
-   
-  }else{
-    file_selected <- todas_necesarias
-    name_zip_file2 <- paste0(temp_dir,'/CHIRPS-V2.0.','_',lugar,'_','pcp','_',fecha_inicial_str,'_',fecha_inicial_str,'.tif')
-   
-  }
+  file_selected <- todas_necesarias
+  
+  
   print('Generando nombres.... completo')
   gc()
   
-  num_cores <- 2
+  num_cores <- 1
   
   # Calcular el n?mero de archivos por n?cleo
   num_archivos <- length(file_selected)
@@ -458,7 +499,7 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   # Aplicar la funci?n en paralelo a cada parte de la lista de nombres de archivos
   raster_crop_total <- parLapply(cl, archivos_por_core,  CHIRPS$procesar_archivo,lonL = coordenadas_aux[1], lonR = coordenadas_aux[2], 
                                  latB = coordenadas_aux[4], latT = coordenadas_aux[3])
-
+  
   
   # Detener el cl?ster
   stopCluster(cl)
@@ -470,18 +511,27 @@ CHIRPS$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   
   raster::writeRaster(FINAL_RASTER,name_zip_file2,overwrite=T)
   print('Exportando resultados.... completo')
-  
   setwd(dirname(name_zip_file2))
   # Crear el nombre del archivo zip con la misma base pero extensión .zip
   
   out_txt <- CHIRPS$generate_raster_info_txt(name_zip_file2)
   zipfile <- sub("\\.tif$", ".zip", basename(name_zip_file2))
   
+  
   # Comprimir el archivo raster en un archivo zip
   zip(zipfile, files = c(basename(name_zip_file2),out_txt))
-
   
-  return(zipfile)
-  
+    }, globals = list(
+      url_pais=url_pais,
+      coordenadas_pais = coordenadas_pais,
+      name_zip_file2 = name_zip_file2,
+      outputFile_zip=outputFile_zip,
+      CHIRPS = CHIRPS,
+      fecha_inicial = fecha_inicial,
+      fecha_final = fecha_final,
+      lugar=lugar,
+      existe=existe
+    ))
+  }
+  return(outputFile_zip)
 }
-

@@ -3,13 +3,30 @@ library(curl)
 library(raster)
 library(parallel)
 library(stringr)
-library(RCurl)
 library(ncdf4)
 library(doParallel)
 library(foreach)
+#library(RCurl)
 
+library(future)
+plan(multisession)
 
 GPM <- new.env()
+
+
+#La funcion valida si el archivo existe y es mayor a 0 el tama;o
+GPM$existe <- function(file) {
+  if (file.exists(file)) {
+    if (file.info(file)$size > 0) {
+      return(TRUE)
+    } else {
+      file.remove(file)
+      return(FALSE)
+    }
+  } else {
+    return(FALSE)
+  }
+}
 
 # Definir el número de núcleos a utilizar
 GPM$num_cores <- 2
@@ -18,7 +35,7 @@ GPM$num_cores <- 2
 registerDoParallel(GPM$num_cores)
 
 GPM$generate_raster_info_txt <- function(raster_path) {
-  closeAllConnections()
+  #closeAllConnections()
   setwd(dirname(raster_path))
   # Verificar si el archivo existe
   if (!file.exists(raster_path)) {
@@ -75,7 +92,7 @@ GPM$generate_raster_info_txt <- function(raster_path) {
     writeLines(linea, output_file)
   }
   close(output_file)
-  closeAllConnections()
+  #closeAllConnections()
   return(basename(name_file))
 }
 
@@ -144,7 +161,7 @@ GPM$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/opt/shiny-server/samples/sample-apps/app_bases/GPM'
+  url_base <- '/srv/shiny-server/datosgrillados/GPM'
   GPM$crear_subdirectorios(url_base, 'PREC')
   GPM$crear_subdirectorios(url_base, 'PREC', 'diario')
   GPM$crear_subdirectorios(url_base, 'PREC', 'diario','PAIS')
@@ -160,7 +177,8 @@ GPM$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   
   name_outputFile <- paste0("GPM_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
   outputFile <- file.path(directorio_tif, name_outputFile)
-  
+  name_outputFile_zip <- paste0("GPM_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.zip')
+  outputFile_zip <- file.path(directorio_tif, name_outputFile_zip)
   
   
   coordenadas_list <- list(
@@ -188,133 +206,154 @@ GPM$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
     stop("Lugar no válido")
   }
   
-  
-  if (file.exists(outputFile)){
+  if (GPM$existe(outputFile_zip)){
     message("Ya se encuentra el archivo generado")
     # Detenemos la ejecución del script
     #return(NULL)
   } else{
-    
-    
-    
-    #for (i in seq_along(urls)) {
-    
-    foreach(
-      i = seq_along(urls),
-      .combine = c,
-      .packages = c("raster", "curl", "stringr", "R.utils", "ncdf4", "RCurl", "stringr"),
-      .export = c("urls", "urls_tif_filename", "url_pais", "coordenadas_pais", "directorio_temp")
-    ) %dopar% {
-      url <- urls[i]
-      url_tif_filename <-paste0(url_pais,'/' ,urls_tif_filename[i]) 
-      print(paste("Processing URL:", url, ' tif:', url_tif_filename))
+    future({
+      library(R.utils)
+      library(curl)
+      library(raster)
+      library(parallel)
+      library(stringr)
+      library(ncdf4)
+      library(doParallel)
+      library(foreach)
       
-      existe <- function(file) {
-        if (file.exists(file)) {
-          if (file.info(file)$size > 0) {
-            return(TRUE)
+      #for (i in seq_along(urls)) {
+      foreach(
+        i = seq_along(urls),
+        .combine = c,
+        .packages = c("raster", "curl", "stringr", "R.utils", "ncdf4", "stringr"),
+        .export = c("urls", "urls_tif_filename", "url_pais", "coordenadas_pais", "directorio_temp")
+      ) %dopar% {
+        url <- urls[i]
+        url_tif_filename <-paste0(url_pais,'/' ,urls_tif_filename[i]) 
+        print(paste("Processing URL:", url, ' tif:', url_tif_filename))
+        
+        existe <- function(file) {
+          if (file.exists(file)) {
+            if (file.info(file)$size > 0) {
+              return(TRUE)
+            } else {
+              file.remove(file)
+              return(FALSE)
+            }
           } else {
-            file.remove(file)
             return(FALSE)
           }
+        }
+        
+        
+        if (!existe(url_tif_filename)) {
+          
+          # El archivo .tif no existe, descárgalo y procesa
+          tryCatch(
+            {
+              #Extraer la fecha de la ruta url_tif_filename
+              fecha <- substr(basename(url_tif_filename), 4, 11)
+              setwd(directorio_temp)
+              # Especifica la ruta al archivo .nc4
+              ruta_archivo <- paste0("3B-DAY-E.MS.MRG.3IMERG.",fecha,"-S000000-E235959.V06.nc4")
+              
+              
+              if (!existe(paste0(directorio_temp,'/',ruta_archivo))) {
+                print('No se encuentra descargado')
+                system(paste0("wget --no-check-certificate --load-cookies ~/.urs_cookies --save-cookies ~/.urs_cookies --keep-session-cookies --content-disposition ", url))
+              }else{
+                print('Ya se encuentra descargado')
+              }
+              # Abre el archivo NetCDF
+              
+              
+              
+              
+              tryCatch({
+                archivo_nc <- nc_open(ruta_archivo)
+                nc_close(archivo_nc)
+              }, error = function(cond) {
+                print(paste("Error:", cond$message))
+                print("Volviendo a descargar...")
+                system(paste0("wget --no-check-certificate --load-cookies ~/.urs_cookies --save-cookies ~/.urs_cookies --keep-session-cookies --content-disposition ", url))
+              })
+              
+              
+              archivo_nc <- nc_open(ruta_archivo)
+              
+              lon <- ncvar_get(archivo_nc, "lon")
+              lat <- ncvar_get(archivo_nc, "lat")
+              # Lee la variable precipitationCal
+              variable_precipitacion <- ncvar_get(archivo_nc, "precipitationCal")
+              # Cierra el archivo NetCDF
+              nc_close(archivo_nc)
+              # Define la extensión geográfica del raster
+              lon_min <- min(lon)
+              lon_max <- max(lon)
+              lat_min <- min(lat)
+              lat_max <- max(lat)
+              # Define la extensión geográfica del raster
+              extension_correcta <- raster::extent(lon_min, lon_max, lat_min, lat_max)
+              # Crea el objeto raster con los datos y la resolución
+              raster_precipitacion <- raster(variable_precipitacion)
+              # Define la extensión geográfica del raster
+              extent(raster_precipitacion) <- extension_correcta
+              # Construir el nombre de salida en el formato deseado
+              nombre_salida <- file.path(url_pais, paste0("gpm", fecha, ".tif"))
+              # Definir la extensión (ajusta las coordenadas según tu necesidad)
+              extension_pais <- raster::extent(coordenadas_pais)
+              # Recortar el RasterStack
+              r <- raster::crop(raster_precipitacion, extension_pais)
+              r[r<0] <- NA
+              r <- round(r, 1)
+              print(r)
+              # Escribir el objeto Raster como un archivo GeoTIFF
+              writeRaster(r, filename = nombre_salida, format = "GTiff", overwrite = TRUE)
+              print(paste("Archivo TIF guardado en:", url_tif_filename))
+            },
+            error = function(cond) {
+              # Si se produce una excepción, se maneja aquí
+              print(paste("Error:", cond$message))
+              print(paste("Cambiando a otro link de descarga..."))
+            }
+          )
         } else {
-          return(FALSE)
+          # El archivo .tif ya existe en la carpeta, omite la descarga y procesamiento
+          print(paste("El archivo TIF ya existe en:", url_tif_filename))
         }
       }
+      stopImplicitCluster()
+      
+      setwd(url_pais)
+      raster_data <- stack(urls_tif_filename)
+      writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+      
+      setwd(dirname(outputFile))
+      out_txt <- GPM$generate_raster_info_txt(outputFile)
+      # Crear el nombre del archivo zip con la misma basename pero extensión .zip
+      zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
+      # Comprimir el archivo raster en un archivo zip
+      zip(zipfile, files = c(basename(outputFile),out_txt))
       
       
-      if (!existe(url_tif_filename)) {
-        
-        # El archivo .tif no existe, descárgalo y procesa
-        tryCatch(
-          {
-            #Extraer la fecha de la ruta url_tif_filename
-            fecha <- substr(basename(url_tif_filename), 4, 11)
-            setwd(directorio_temp)
-            # Especifica la ruta al archivo .nc4
-            ruta_archivo <- paste0("3B-DAY-E.MS.MRG.3IMERG.",fecha,"-S000000-E235959.V06.nc4")
-            
-            
-            if (!existe(paste0(directorio_temp,'/',ruta_archivo))) {
-              print('No se encuentra descargado')
-              system(paste0("wget --no-check-certificate --load-cookies ~/.urs_cookies --save-cookies ~/.urs_cookies --keep-session-cookies --content-disposition ", url))
-            }else{
-              print('Ya se encuentra descargado')
-            }
-            # Abre el archivo NetCDF
-            
-            
-            
-            
-            tryCatch({
-              archivo_nc <- nc_open(ruta_archivo)
-              nc_close(archivo_nc)
-            }, error = function(cond) {
-              print(paste("Error:", cond$message))
-              print("Volviendo a descargar...")
-              system(paste0("wget --no-check-certificate --load-cookies ~/.urs_cookies --save-cookies ~/.urs_cookies --keep-session-cookies --content-disposition ", url))
-            })
-            
-            
-            archivo_nc <- nc_open(ruta_archivo)
-          
-            lon <- ncvar_get(archivo_nc, "lon")
-            lat <- ncvar_get(archivo_nc, "lat")
-            # Lee la variable precipitationCal
-            variable_precipitacion <- ncvar_get(archivo_nc, "precipitationCal")
-            # Cierra el archivo NetCDF
-            nc_close(archivo_nc)
-            # Define la extensión geográfica del raster
-            lon_min <- min(lon)
-            lon_max <- max(lon)
-            lat_min <- min(lat)
-            lat_max <- max(lat)
-            # Define la extensión geográfica del raster
-            extension_correcta <- raster::extent(lon_min, lon_max, lat_min, lat_max)
-            # Crea el objeto raster con los datos y la resolución
-            raster_precipitacion <- raster(variable_precipitacion)
-            # Define la extensión geográfica del raster
-            extent(raster_precipitacion) <- extension_correcta
-            # Construir el nombre de salida en el formato deseado
-            nombre_salida <- file.path(url_pais, paste0("gpm", fecha, ".tif"))
-            # Definir la extensión (ajusta las coordenadas según tu necesidad)
-            extension_pais <- raster::extent(coordenadas_pais)
-            # Recortar el RasterStack
-            r <- raster::crop(raster_precipitacion, extension_pais)
-            r[r<0] <- NA
-            r <- round(r, 1)
-            print(r)
-            # Escribir el objeto Raster como un archivo GeoTIFF
-            writeRaster(r, filename = nombre_salida, format = "GTiff", overwrite = TRUE)
-            print(paste("Archivo TIF guardado en:", url_tif_filename))
-          },
-          error = function(cond) {
-            # Si se produce una excepción, se maneja aquí
-            print(paste("Error:", cond$message))
-            print(paste("Cambiando a otro link de descarga..."))
-          }
-        )
-      } else {
-        # El archivo .tif ya existe en la carpeta, omite la descarga y procesamiento
-        print(paste("El archivo TIF ya existe en:", url_tif_filename))
-      }
-    }
-    stopImplicitCluster()
+    }, globals = list(
+      urls = urls,
+      urls_tif_filename=urls_tif_filename,
+      url_base=url_base,
+      url_pais=url_pais,
+      directorio_temp = directorio_temp,
+      outputFile = outputFile,
+      coordenadas_list = coordenadas_list,
+      GPM = GPM,
+      fecha_inicial = fecha_inicial,
+      fecha_final = fecha_final
+      
+    ))
     
-    setwd(url_pais)
-    raster_data <- stack(urls_tif_filename)
-    writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+    
   }
   
-  
-  setwd(dirname(outputFile))
-  out_txt <- GPM$generate_raster_info_txt(outputFile)
-  # Crear el nombre del archivo zip con la misma basename pero extensión .zip
-  zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
-  # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = c(basename(outputFile),out_txt))
-  
-  return(zipfile)
+  return(outputFile_zip)
 }
 
 

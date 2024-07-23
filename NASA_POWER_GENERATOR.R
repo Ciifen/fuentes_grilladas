@@ -3,12 +3,31 @@ library(curl)
 library(raster)
 library(parallel)
 library(stringr)
-library(RCurl)
 library(ncdf4)
 library(doParallel)
 library(foreach)
+#library(RCurl)
+
+library(future)
+plan(multisession)
 
 NASA_POWER <- new.env()
+
+
+#La funcion valida si el archivo existe y es mayor a 0 el tama;o
+NASA_POWER$existe <- function(file) {
+  if (file.exists(file)) {
+    if (file.info(file)$size > 0) {
+      return(TRUE)
+    } else {
+      file.remove(file)
+      return(FALSE)
+    }
+  } else {
+    return(FALSE)
+  }
+}
+
 
 NASA_POWER$obtener_nombre_variable <- function(parametro) {
   switch(parametro,
@@ -32,10 +51,10 @@ registerDoParallel(NASA_POWER$num_cores)
 
 
 NASA_POWER$generate_raster_info_txt <- function(raster_path) {
-  closeAllConnections()
+  #closeAllConnections()
   setwd(dirname(raster_path))
   # Verificar si el archivo existe
-  if (!file.exists(raster_path)) {
+  if (!NASA_POWER$existe(raster_path)) {
     stop("El archivo especificado no existe.")
   }
   
@@ -89,7 +108,7 @@ NASA_POWER$generate_raster_info_txt <- function(raster_path) {
     writeLines(linea, output_file)
   }
   close(output_file)
-  closeAllConnections()
+  #closeAllConnections()
   return(basename(name_file))
 }
 
@@ -154,7 +173,7 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/opt/shiny-server/samples/sample-apps/app_bases/NASA_POWER'
+  url_base <- '/srv/shiny-server/datosgrillados/NASA_POWER'
   
   NASA_POWER$crear_subdirectorios(url_base, parametro)
   NASA_POWER$crear_subdirectorios(url_base, parametro, 'diario')
@@ -171,6 +190,8 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
   
   name_outputFile <- paste0("NASAPOWER_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
   outputFile <- file.path(directorio_tif, name_outputFile)
+  name_outputFile_zip <- paste0("NASAPOWER_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.zip')
+  outputFile_zip <- file.path(directorio_tif, name_outputFile_zip)
   
 
   coordenadas_list <- list(
@@ -197,20 +218,26 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
   }
   
   
-  if (file.exists(outputFile)){
+  if (NASA_POWER$existe(outputFile_zip)){
     message("Ya se encuentra el archivo generado")
     # Detenemos la ejecución del script
     return(NULL)
   } else{
-    
-    
-    
+    future({
+      library(R.utils)
+      library(curl)
+      library(raster)
+      library(parallel)
+      library(stringr)
+      library(ncdf4)
+      library(doParallel)
+      library(foreach)
     #for (i in seq_along(urls)) {
     
     foreach(
       i = seq_along(urls),
       .combine = c,
-      .packages = c("raster", "curl", "stringr", "R.utils", "ncdf4", "RCurl", "stringr"),
+      .packages = c("raster", "curl", "stringr", "R.utils", "ncdf4", "stringr"),
       .export = c("urls", "urls_tif_filename", "url_pais", "directorio_temp")
     ) %dopar% {
       url <- urls[i]
@@ -327,19 +354,32 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
     setwd(url_pais)
     raster_data <- stack(urls_tif_filename)
     writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+    setwd(dirname(outputFile))
+    
+    out_txt <- NASA_POWER$generate_raster_info_txt(outputFile)
+    # Crear el nombre del archivo zip con la misma basename pero extensión .zip
+    zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
+    # Comprimir el archivo raster en un archivo zip
+    zip(zipfile, files = c(basename(outputFile), out_txt))
+    
+    }, globals = list(
+      urls = urls,
+      url_pais=url_pais,
+      urls_tif_filename=urls_tif_filename,
+      directorio_temp = directorio_temp,
+      outputFile = outputFile,
+      outputFile_zip=outputFile_zip,
+      coordenadas_list = coordenadas_list,
+      NASA_POWER = NASA_POWER,
+      fecha_inicial = fecha_inicial,
+      fecha_final = fecha_final
+    ))
+    
   }
   
   
-  setwd(dirname(outputFile))
-  out_txt <- NASA_POWER$generate_raster_info_txt(outputFile)
-  # Crear el nombre del archivo zip con la misma basename pero extensión .zip
-  zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
-  # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = c(basename(outputFile), out_txt))
-  
-  return(zipfile)
+  return(outputFile_zip)
 }
-
 
 
 

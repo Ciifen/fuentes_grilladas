@@ -3,11 +3,14 @@ library(curl)
 library(raster)
 library(parallel)
 library(stringr)
-library(RCurl)
 library(ncdf4)
 library(lubridate)
 library(doParallel)
 library(foreach)
+#library(RCurl)
+
+library(future)
+plan(multisession)
 
 GPCC <- new.env()
 
@@ -26,7 +29,7 @@ GPCC$existe <- function(file) {
 }
 
 GPCC$generate_raster_info_txt <- function(raster_path) {
-  closeAllConnections()
+  #closeAllConnections()
   setwd(dirname(raster_path))
   # Verificar si el archivo existe
   if (!file.exists(raster_path)) {
@@ -83,7 +86,7 @@ GPCC$generate_raster_info_txt <- function(raster_path) {
     writeLines(linea, output_file)
   }
   close(output_file)
-  closeAllConnections()
+  #closeAllConnections()
   return(basename(name_file))
 }
 
@@ -161,7 +164,7 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/opt/shiny-server/samples/sample-apps/app_bases/GPCC'
+  url_base <- '/srv/shiny-server/datosgrillados/GPCC'
   GPCC$crear_subdirectorios(url_base, 'PREC')
   GPCC$crear_subdirectorios(url_base, 'PREC', 'diario')
   GPCC$crear_subdirectorios(url_base, 'PREC', 'diario','PAIS')
@@ -177,16 +180,19 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   
   name_outputFile <- paste0("GPCC_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.tif')
   outputFile <- file.path(directorio_tif, name_outputFile)
+  name_outputFile_zip <- paste0("GPCC_",lugar, '_',parametro,'_',fecha_inicial,'_',fecha_final,'.zip')
+  outputFile_zip <- file.path(directorio_tif, name_outputFile_zip)
   
   
   coordenadas_list <- list(
-    ven = c(lonL = -73.378, lonR = -59.8035,latB = 0.6499, latT = 12.2011 ),
-    col = c(lonL = -79.3667, lonR = -66.8694, latB = -4.2271,latT = 12.4583),
-    ecu = c(lonL = -81.0833, lonR = -75.1867,  latB = -5.014, latT = 1.6742),
+    ven = c(lonL = -73.378, lonR = -59.8035,latB = 0.6499, latT = 12.8011 ),
+    col = c(lonL = -81, lonR = -66.8694, latB = -4.2271,latT = 13.5),
+    ecu = c(lonL = -91.38, lonR = -75.1867,  latB = -5.014, latT = 1.6742),
     per = c(lonL = -81.3269, lonR = -68.6651, latB = -18.3496, latT = 0.012),
     bol = c(lonL = -69.6409, lonR = -57.453,  latB = -22.8969,latT = -9.6805),
-    chi = c(lonL = -75.6445, lonR = -66.4173, latB = -45, latT = -17.5065)
+    chi = c(lonL = -109.5, lonR = -66.4173, latB = -60, latT = -17.5065)
   )
+  
   
   urls_paises <- list(
     ven = url_venezuela,
@@ -204,11 +210,21 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   }
   
   
-  if (file.exists(outputFile)){
+  if (GPCC$existe(outputFile_zip)){
     message("Ya se encuentra el archivo generado")
     # Detenemos la ejecución del script
   } else{
-    
+    future({
+      
+      library(R.utils)
+      library(curl)
+      library(raster)
+      library(parallel)
+      library(stringr)
+      library(ncdf4)
+      library(lubridate)
+      library(doParallel)
+      library(foreach)
     
     #Descargar archivos nc.gz
     for (i in seq_along(urls)) {
@@ -241,7 +257,7 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
     foreach(
       i = seq_along(urls_tif_filename),
       .combine = c,
-      .packages = c("raster", "curl", "stringr", "R.utils", "ncdf4", "RCurl", "stringr"),
+      .packages = c("raster", "curl", "stringr", "R.utils", "ncdf4", "stringr"),
       .export = c("urls", "urls_tif_filename", "url_pais", "coordenadas_pais", "directorio_temp")
     ) %dopar% {
       
@@ -303,17 +319,29 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
     setwd(url_pais)
     raster_data <- stack(urls_tif_filename)
     writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+    setwd(dirname(outputFile))
+    out_txt <- GPCC$generate_raster_info_txt(outputFile)
+    # Crear el nombre del archivo zip con la misma basename pero extensión .zip
+    #zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
+    # Comprimir el archivo raster en un archivo zip
+    zip(outputFile_zip, files = c(basename(outputFile),out_txt))
+    
+    }, globals = list(
+      urls = urls,
+      url_pais=url_pais,
+      urls_tif_filename=urls_tif_filename,
+      directorio_temp = directorio_temp,
+      outputFile = outputFile,
+      outputFile_zip=outputFile_zip,
+      coordenadas_list = coordenadas_list,
+      coordenadas_pais=coordenadas_pais,
+      GPCC = GPCC,
+      fecha_inicial = fecha_inicial,
+      fecha_final = fecha_final
+    ))
+    
   }
-
-  setwd(dirname(outputFile))
-  out_txt <- GPCC$generate_raster_info_txt(outputFile)
-  # Crear el nombre del archivo zip con la misma basename pero extensión .zip
-  zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
-  # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = c(basename(outputFile),out_txt))
-  
-  return(zipfile)
+  return(outputFile_zip)
 }
-
 
 

@@ -4,18 +4,33 @@ library(curl)
 library(raster)
 library(parallel)
 library(stringr)
-library(RCurl)
+#library(RCurl)
 library(ncdf4)
 library(lubridate)
 library(doParallel)
 library(foreach)
 
+library(future)
+plan(multisession)
 
 NCEP_NCAR <- new.env()
+#La funcion valida si el archivo existe y es mayor a 0 el tama;o
+NCEP_NCAR$existe <- function(file) {
+  if (file.exists(file)) {
+    if (file.info(file)$size > 0) {
+      return(TRUE)
+    } else {
+      file.remove(file)
+      return(FALSE)
+    }
+  } else {
+    return(FALSE)
+  }
+}
 
 
 NCEP_NCAR$generate_raster_info_txt <- function(raster_path) {
-  closeAllConnections()
+  #closeAllConnections()
   setwd(dirname(raster_path))
   # Verificar si el archivo existe
   if (!file.exists(raster_path)) {
@@ -72,7 +87,7 @@ NCEP_NCAR$generate_raster_info_txt <- function(raster_path) {
     writeLines(linea, output_file)
   }
   close(output_file)
-  closeAllConnections()
+  #closeAllConnections()
   return(basename(name_file))
 }
 
@@ -112,6 +127,7 @@ NCEP_NCAR$generar_urls <- function(Rango_fecha, parametro){
   }else if (parametro == 'SLP'){
     urlbase <- "https://psl.noaa.gov/thredds/fileServer/Datasets/ncep.reanalysis/Dailies/surface/"
   }
+
   
   if (parametro == 'UWND'){
     name_variable <- 'uwnd'
@@ -182,7 +198,7 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/opt/shiny-server/samples/sample-apps/app_bases/NCEP_NCAR'
+  url_base <- '/srv/shiny-server/datosgrillados/NCEP_NCAR'
   
   NCEP_NCAR$crear_subdirectorios(url_base, parametro)
   NCEP_NCAR$crear_subdirectorios(url_base, parametro, 'diario')
@@ -198,7 +214,9 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
   directorio_tif <- NCEP_NCAR$crear_subdirectorios(url_base, parametro, 'diario', 'tif')
   
   name_outputFile <- paste0("NCEP_",lugar, '_',parametro,'_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.tif')
+  name_outputFile_zip <- paste0("NCEP_",lugar, '_',parametro,'_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.zip')
   outputFile <- file.path(directorio_tif, name_outputFile)
+  outputFile_zip <- file.path(directorio_tif, name_outputFile_zip)
   
   coordenadas_list <- list(
     VENEZUELA = c(lonL = -73.378, lonR = -59.8035,latB = 0.6499, latT = 12.8011 ),
@@ -223,21 +241,33 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
     stop("Lugar no válido")
   }
   
-  if (file.exists(outputFile)){
+  if (NCEP_NCAR$existe(name_outputFile_zip)){
     message(paste0("Ya se encuentra el archivo generado"), outputFile)
     # Detenemos la ejecución del script
     return(NULL)
     
   }else{
     
-    
+    future({
+      library(doParallel)
+      library(R.utils)
+      library(curl)
+      library(raster)
+      library(parallel)
+      library(stringr)
+      library(ncdf4)
+      library(lubridate)
+      library(doParallel)
+      library(foreach)
+      
+      
     #Descargar archivos nc
     for (i in seq_along(urls)) {
       url <- urls[i][[1]]
       print(paste("Processing URL:", url))
       file_temp <- paste0(directorio_temp, '/', basename(url))
       setwd(directorio_temp)
-      if (file.exists(file_temp)) {
+      if (NCEP_NCAR$existe(file_temp)) {
         if (file.info(file_temp)$size>0) {
           if (as.Date(file.info(file_temp)$ctime) != Sys.Date()){
             file.remove(file_temp)
@@ -260,8 +290,8 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
       foreach(
         i = seq_along(urls_tif_filename),
         .combine = c,
-        .packages = c("raster", "curl", "stringr", "R.utils", "ncdf4", "RCurl", "stringr"),
-        .export = c("urls", "urls_tif_filename", "url_pais", "coordenadas_pais", "directorio_temp")
+        .packages = c("raster", "curl", "stringr", "R.utils", "ncdf4", "stringr"),
+        .export = c("urls", "urls_tif_filename", "url_pais", "directorio_temp")
       ) %dopar% {
       
       url_tif_filename <-urls_tif_filename[i][[1]]
@@ -269,7 +299,7 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
    
       
       #Validar si el archivo existe y esta creado correctamente
-      existe <- file.exists(url_tif_pais)
+      existe <- NCEP_NCAR$existe(url_tif_pais)
       
       #La funcion valida si el archivo existe y es mayor a 0 el tama;o
       existe <- function(file) {
@@ -401,7 +431,6 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
         print(paste("El archivo TIF ya existe en:", url_tif_filename))
       }
       
-
       
     }
     
@@ -409,15 +438,31 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
     setwd(url_pais)
     raster_data <- stack(urls_tif_filename)
     writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+    setwd(dirname(outputFile))
+    out_txt <- NCEP_NCAR$generate_raster_info_txt(outputFile)
+    # Crear el nombre del archivo zip con la misma basename pero extensión .zip
+    zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
+    # Comprimir el archivo raster en un archivo zip
+    zip(zipfile, files = c(basename(outputFile), out_txt))
+    
+  }, globals = list(
+    urls = urls,
+    url_pais=url_pais,
+    urls_tif_filename=urls_tif_filename,
+    directorio_temp = directorio_temp,
+    outputFile = outputFile,
+    outputFile_zip=outputFile_zip,
+    coordenadas_list = coordenadas_list,
+    NCEP_NCAR = NCEP_NCAR,
+    parametro = parametro,
+    url_base=url_base
+  ))
+    
+    
   }
   
-  setwd(dirname(outputFile))
-  out_txt <- NCEP_NCAR$generate_raster_info_txt(outputFile)
-  # Crear el nombre del archivo zip con la misma basename pero extensión .zip
-  zipfile <- sub("\\.tif$", ".zip", basename(outputFile))
-  # Comprimir el archivo raster en un archivo zip
-  zip(zipfile, files = c(basename(outputFile), out_txt))
-  return(zipfile)
+  
+  return(outputFile_zip)
   
 }
 
