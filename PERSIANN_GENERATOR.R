@@ -8,7 +8,6 @@ library(foreach)
 #library(RCurl)
 
 library(future)
-plan(multisession)
 
 PERSIANN <- new.env()
 
@@ -136,12 +135,23 @@ PERSIANN$generate_raster_info_txt <- function(raster_path) {
 
 
 PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
+  
+  
+  fechas <- strsplit(Rango_fecha, "-")[[1]]
+  
+  # Convertir las fechas a formato Date
+  fecha_inicial <- as.Date(fechas[1], format = "%Y/%m/%d")
+  fecha_final <- as.Date(fechas[2], format = "%Y/%m/%d")
+  
+  Rango_fecha <- list(fecha_inicial, fecha_final)
+  
   # Lista con urls
+  
   output_urls <- PERSIANN$generar_urls(Rango_fecha)
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/srv/shiny-server/datosgrillados/PERSIANN'
+  url_base <- '/opt/shiny-server/samples/sample-apps/datosgrillados/PERSIANN'
   PERSIANN$crear_subdirectorios(url_base, 'PREC')
   PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario')
   PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario','PAIS')
@@ -154,11 +164,11 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
   directorio_temp <- PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario', 'temp')
   directorio_tif <- PERSIANN$crear_subdirectorios(url_base, 'PREC', 'diario', 'tif')
   
-  name_outputFile <- paste0("PERSIANN_",lugar,'_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.tif')
-  name_outputFile_zip <- paste0("PERSIANN_",lugar,'_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.zip')
+  name_outputFile <- paste0("PERSIANN_",lugar,'_','pcp','_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.tif')
+  name_outputFile_zip <- paste0("PERSIANN_",lugar,'_','pcp','_',output_urls$fecha_inicial,'_',output_urls$fecha_final,'.zip')
   
   outputFile <- file.path(directorio_tif, name_outputFile)
-  outputFile_zip <- file.path(directorio_tif, name_outputFile)
+  outputFile_zip <- file.path(directorio_tif, name_outputFile_zip)
   
   coordenadas_list <- list(
     VENEZUELA = c(lonL = -73.378, lonR = -59.8035,latB = 0.6499, latT = 12.8011 ),
@@ -191,7 +201,7 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
     #return(NULL)
     
   }else{
-    
+    plan(multisession, workers = 2)
     future({
       
       library(R.utils)
@@ -288,6 +298,9 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
       raster_data <- stack(urls_tif_filename)
       writeRaster(raster_data, filename=outputFile, overwrite=TRUE) 
       
+      rm(raster_data, urls_tif_filename)#Eliminar variable en memoria
+      gc()#recolectar basura
+      
       setwd(dirname(outputFile))
       out_txt <- PERSIANN$generate_raster_info_txt(outputFile)
       # Crear el nombre del archivo zip con la misma basename pero extensión .zip
@@ -306,15 +319,12 @@ PERSIANN$downloads_transformar_a_tif <- function(Rango_fecha, lugar) {
       directorio_tif = directorio_tif,
       PERSIANN = PERSIANN
     ))
-    
+    plan(sequential)
     
     
   }
   
-  
-  
-  
-  
+
   return(outputFile_zip)
   
   

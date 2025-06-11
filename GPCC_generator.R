@@ -10,7 +10,7 @@ library(foreach)
 #library(RCurl)
 
 library(future)
-plan(multisession)
+
 
 GPCC <- new.env()
 
@@ -96,9 +96,6 @@ GPCC$generate_raster_info_txt <- function(raster_path) {
 
 GPCC$generar_urls <- function(fecha_inicial, fecha_final){
   
-  
-  seqfechas <- seq(fecha_inicial, fecha_final, by='month')
-  
   # URLs de las páginas
   urlbase <- "https://opendata.dwd.de/climate_environment/GPCC/first_guess_daily/"
   
@@ -154,7 +151,6 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   # Registrar el backend paralelo con el número de núcleos especificado
   registerDoParallel(num_cores)
   
-  
   fecha_inicial <- Rango_fecha[[1]]
   fecha_final <- Rango_fecha[[2]]
   
@@ -164,7 +160,7 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/srv/shiny-server/datosgrillados/GPCC'
+  url_base <- '/opt/shiny-server/samples/sample-apps/datosgrillados/GPCC'
   GPCC$crear_subdirectorios(url_base, 'PREC')
   GPCC$crear_subdirectorios(url_base, 'PREC', 'diario')
   GPCC$crear_subdirectorios(url_base, 'PREC', 'diario','PAIS')
@@ -214,6 +210,7 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
     message("Ya se encuentra el archivo generado")
     # Detenemos la ejecución del script
   } else{
+    plan(multisession, workers = 2)
     future({
       
       library(R.utils)
@@ -319,6 +316,10 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
     setwd(url_pais)
     raster_data <- stack(urls_tif_filename)
     writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+    
+    rm(raster_data, urls_tif_filename)#Eliminar variable en memoria
+    gc()#recolectar basura
+    
     setwd(dirname(outputFile))
     out_txt <- GPCC$generate_raster_info_txt(outputFile)
     # Crear el nombre del archivo zip con la misma basename pero extensión .zip
@@ -341,6 +342,8 @@ GPCC$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro) {
     ))
     
   }
+  
+  plan(sequential)
   return(outputFile_zip)
 }
 

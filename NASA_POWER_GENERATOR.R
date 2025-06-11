@@ -9,7 +9,7 @@ library(foreach)
 #library(RCurl)
 
 library(future)
-plan(multisession)
+
 
 NASA_POWER <- new.env()
 
@@ -44,7 +44,7 @@ NASA_POWER$obtener_nombre_variable <- function(parametro) {
 
 
 # Definir el número de núcleos a utilizar
-NASA_POWER$num_cores <- 2
+NASA_POWER$num_cores <- 1
 # Registrar el backend paralelo con el número de núcleos especificado
 registerDoParallel(NASA_POWER$num_cores)
 
@@ -173,7 +173,7 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/srv/shiny-server/datosgrillados/NASA_POWER'
+  url_base <- '/opt/shiny-server/samples/sample-apps/datosgrillados/NASA_POWER'
   
   NASA_POWER$crear_subdirectorios(url_base, parametro)
   NASA_POWER$crear_subdirectorios(url_base, parametro, 'diario')
@@ -223,6 +223,8 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
     # Detenemos la ejecución del script
     return(NULL)
   } else{
+    
+    plan(multisession, workers = 2)
     future({
       library(R.utils)
       library(curl)
@@ -354,6 +356,10 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
     setwd(url_pais)
     raster_data <- stack(urls_tif_filename)
     writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+    
+    rm(raster_data, urls_tif_filename)#Eliminar variable en memoria
+    gc()#recolectar basura
+    
     setwd(dirname(outputFile))
     
     out_txt <- NASA_POWER$generate_raster_info_txt(outputFile)
@@ -374,10 +380,10 @@ NASA_POWER$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro
       fecha_inicial = fecha_inicial,
       fecha_final = fecha_final
     ))
-    
+    plan(sequential)
   }
   
-  
+
   return(outputFile_zip)
 }
 

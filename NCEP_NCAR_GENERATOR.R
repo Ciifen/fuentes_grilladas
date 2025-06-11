@@ -11,7 +11,7 @@ library(doParallel)
 library(foreach)
 
 library(future)
-plan(multisession)
+
 
 NCEP_NCAR <- new.env()
 #La funcion valida si el archivo existe y es mayor a 0 el tama;o
@@ -187,7 +187,7 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
   
   # Definir el número de núcleos a utilizar
   #num_cores <- detectCores()
-  num_cores <- 2
+  num_cores <- 1
   
   # Registrar el backend paralelo con el número de núcleos especificado
   registerDoParallel(num_cores)
@@ -198,7 +198,7 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
   urls <- output_urls$lista_urls
   urls_tif_filename <- output_urls$urls_tif_filename
   
-  url_base <- '/srv/shiny-server/datosgrillados/NCEP_NCAR'
+  url_base <- '/opt/shiny-server/samples/sample-apps/datosgrillados/NCEP_NCAR'
   
   NCEP_NCAR$crear_subdirectorios(url_base, parametro)
   NCEP_NCAR$crear_subdirectorios(url_base, parametro, 'diario')
@@ -247,7 +247,7 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
     return(NULL)
     
   }else{
-    
+    plan(multisession, workers = 2)
     future({
       library(doParallel)
       library(R.utils)
@@ -438,6 +438,10 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
     setwd(url_pais)
     raster_data <- stack(urls_tif_filename)
     writeRaster(raster_data, filename=outputFile, overwrite=TRUE)
+    
+    rm(raster_data, urls_tif_filename)#Eliminar variable en memoria
+    gc()#recolectar basura
+    
     setwd(dirname(outputFile))
     out_txt <- NCEP_NCAR$generate_raster_info_txt(outputFile)
     # Crear el nombre del archivo zip con la misma basename pero extensión .zip
@@ -457,7 +461,7 @@ NCEP_NCAR$downloads_transformar_a_tif <- function(Rango_fecha, lugar, parametro)
     parametro = parametro,
     url_base=url_base
   ))
-    
+    plan(sequential)
     
   }
   
