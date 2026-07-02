@@ -1,3 +1,21 @@
+# =============================================================================
+# fuentes_grilladas — Descarga de datos climáticos e hidrológicos en formato ráster
+# -----------------------------------------------------------------------------
+# Copyright (C) 2025 CIIFEN — Centro Internacional para la Investigación
+# del Fenómeno de El Niño (https://ciifen.org)
+# Author       : Iliana Salazar
+#                Desarrolladora de Servicios Climáticos
+#                CIIFEN
+# Project      : Proyecto ENANDES
+# System       : Plataforma web de productos y servicios climáticos
+# Repository   : https://github.com/Ciifen/fuentes_grilladas
+# Contact      : Pier Maquilón — p.maquilon@ciifen.org
+#
+# All products resulting from this work are the exclusive property of CIIFEN.
+# Attribution to the author must be preserved in all copies and
+# derivative works.
+# =============================================================================
+
 #install.packages("R.methodsS3", dependencies=TRUE);install.packages("sp", dependencies=TRUE);install.packages("R.oo", dependencies=TRUE)
 #install.packages("Rcpp", dependencies=TRUE);install.packages("terra", dependencies=TRUE);install.packages("raster", dependencies=TRUE)
 #install.packages("R.utils");install.packages("curl");install.packages("raster");install.packages("parallel");install.packages("stringr")
